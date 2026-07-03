@@ -601,33 +601,59 @@
     } catch (e) { return url; }
   }
 
-  /* ---------- conexión con la API (Google Apps Script como backend JSON) ---------- */
-  // Reemplaza esta URL por la de TU implementación (Implementar → Nueva implementación → Aplicación web).
-  // Debe terminar en /exec, no en /dev.
+  /* ---------- conexión con la API (Google Apps Script como backend, vía JSONP) ---------- */
+  // Reemplaza esta URL por la de TU implementación (Implementar → Administrar
+  // implementaciones → Nueva versión). Debe terminar en /exec, no en /dev.
   var API_URL = 'https://script.google.com/macros/s/AKfycbxsFwZ3oED6v7PjqV8dm5MW5c73xKrInydu795AZdWturW039aEcsxxiYmXy5qZhMsg/exec';
 
-  function apiGet(action, params) {
-    var url = API_URL + '?action=' + encodeURIComponent(action);
-    Object.keys(params || {}).forEach(function(k) {
-      url += '&' + encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
-    });
-    return fetch(url).then(function(r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return r.json();
+  // Apps Script nunca envía la cabecera Access-Control-Allow-Origin, así que
+  // fetch() desde un dominio distinto (GitHub Pages) siempre es bloqueado por
+  // el navegador — para lecturas y para escrituras por igual. JSONP evita el
+  // problema: la respuesta se carga como una etiqueta <script>, que nunca
+  // está sujeta a la política de CORS.
+  var _jsonpN = 0;
+  function jsonpRequest(params) {
+    return new Promise(function(resolve, reject) {
+      var cbName = '_rcCb' + (_jsonpN++) + '_' + Date.now();
+      var script = document.createElement('script');
+
+      var timeoutId = setTimeout(function() {
+        limpiar();
+        reject(new Error('Tiempo de espera agotado conectando con la API'));
+      }, 15000);
+
+      function limpiar() {
+        clearTimeout(timeoutId);
+        delete window[cbName];
+        if (script.parentNode) script.parentNode.removeChild(script);
+      }
+
+      window[cbName] = function(data) {
+        limpiar();
+        resolve(data);
+      };
+
+      var url = API_URL + '?callback=' + cbName;
+      Object.keys(params || {}).forEach(function(k) {
+        var v = params[k];
+        url += '&' + encodeURIComponent(k) + '=' + encodeURIComponent(v === undefined || v === null ? '' : v);
+      });
+
+      script.src = url;
+      script.onerror = function() {
+        limpiar();
+        reject(new Error('Error de red al conectar con la API'));
+      };
+      document.head.appendChild(script);
     });
   }
 
-  // Content-Type: text/plain evita que el navegador dispare un preflight OPTIONS,
-  // que Apps Script no responde. El backend parsea el body como JSON de todas formas.
+  function apiGet(action, params) {
+    return jsonpRequest(Object.assign({ action: action }, params || {}));
+  }
+
   function apiPost(action, datos) {
-    return fetch(API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(Object.assign({ action: action }, datos || {}))
-    }).then(function(r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return r.json();
-    });
+    return jsonpRequest(Object.assign({ action: action }, datos || {}));
   }
 
   /* ---------- carga inicial ---------- */
