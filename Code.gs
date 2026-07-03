@@ -22,48 +22,74 @@
  *      Quién tiene acceso: Cualquiera
  */
 
+/**
+ * API del Planeador de Clases — Res Cogitans
+ * ---------------------------------------------------------------
+ * Este script YA NO sirve el HTML (doGet ya no usa HtmlService).
+ * Es una API que el frontend (alojado en GitHub Pages) consulta
+ * por JSONP — NO por fetch(). Los datos siguen viviendo en esta
+ * misma hoja de cálculo — no cambia nada de cómo se guardan.
+ *
+ * ¿Por qué JSONP y no fetch()?
+ * Google Apps Script nunca envía la cabecera Access-Control-Allow-Origin,
+ * así que cualquier fetch() desde un dominio distinto (como
+ * anderssonrc.github.io) es bloqueado por el navegador, sin excepción,
+ * tanto para lecturas como para escrituras. JSONP evita el problema
+ * por completo porque carga la respuesta como una etiqueta <script>,
+ * algo que el navegador nunca sujeta a la política de CORS.
+ * Por eso TODO —lecturas y escrituras— pasa ahora por GET con un
+ * parámetro ?callback=..., y ya no se usa doPost.
+ *
+ * Ejemplos de URL que genera el frontend:
+ *   ?action=getMaterias&callback=cb1
+ *   ?action=getActividades&grado=Once&callback=cb2
+ *   ?action=guardarActividad&grado=Once&titulo=...&callback=cb3
+ *
+ * Después de pegar este código:
+ * 1) Ejecuta prepararColumnas() una vez (si no lo has hecho ya).
+ * 2) Implementar → Administrar implementaciones → editar → Nueva versión.
+ * 3) Copia la URL que termina en /exec y pégala en API_URL dentro
+ *    del Index.html del frontend.
+ * 4) Verifica que la implementación tenga:
+ *      Ejecutar como: Yo (tu cuenta)
+ *      Quién tiene acceso: Cualquiera
+ */
+
 function doGet(e) {
-  var action = e.parameter.action;
+  var p = e.parameter;
+  var action = p.action;
+  var resultado;
   try {
-    var resultado;
     if (action === 'getMaterias') {
       resultado = getMaterias();
     } else if (action === 'getActividades') {
-      resultado = getActividades(e.parameter.grado);
-    } else {
-      resultado = { ok: false, error: 'Acción GET no reconocida: ' + action };
-    }
-    return jsonOut(resultado);
-  } catch (err) {
-    return jsonOut({ ok: false, error: err.toString() });
-  }
-}
-
-function doPost(e) {
-  try {
-    var body = JSON.parse(e.postData.contents);
-    var action = body.action;
-    var resultado;
-    if (action === 'guardarActividad') {
-      resultado = guardarActividad(body);
+      resultado = getActividades(p.grado);
+    } else if (action === 'guardarActividad') {
+      resultado = guardarActividad(p);
     } else if (action === 'actualizarEstado') {
-      resultado = actualizarEstado(body.grado, body.id, body.estado);
+      resultado = actualizarEstado(p.grado, p.id, p.estado);
     } else if (action === 'eliminarActividad') {
-      resultado = eliminarActividad(body.grado, body.id);
+      resultado = eliminarActividad(p.grado, p.id);
     } else if (action === 'editarActividad') {
-      resultado = editarActividad(body);
+      resultado = editarActividad(p);
     } else {
-      resultado = { ok: false, error: 'Acción POST no reconocida: ' + action };
+      resultado = { ok: false, error: 'Acción no reconocida: ' + action };
     }
-    return jsonOut(resultado);
   } catch (err) {
-    return jsonOut({ ok: false, error: err.toString() });
+    resultado = { ok: false, error: err.toString() };
   }
+  return jsonpOut(resultado, p.callback);
 }
 
-function jsonOut(obj) {
+function jsonpOut(obj, callback) {
+  var json = JSON.stringify(obj);
+  if (callback) {
+    return ContentService
+      .createTextOutput(callback + '(' + json + ')')
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
   return ContentService
-    .createTextOutput(JSON.stringify(obj))
+    .createTextOutput(json)
     .setMimeType(ContentService.MimeType.JSON);
 }
 
